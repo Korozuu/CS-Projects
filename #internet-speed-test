@@ -1,0 +1,190 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import speedtest
+from datetime import datetime
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import pandas as pd
+import threading
+
+# This class represents an Internet Speed Tool, which evaluates internet quality and speed.
+class InternetSpeedTool:
+    # Constructor method initializes the tool.
+    def __init__ (self, root):
+        self.root = root
+        self.root.title("Internet Quality & Speed Evaluation Tool")
+
+        # Initialize variables for storing test history and imported dataset.
+        self.test_history = []
+        self.imported_dataset = pd.DataFrame()
+        self.plot_thread = None
+
+        # Create GUI components for different tabs.
+        self.create_tabs()
+
+    # Method to create tabs for different functionalities.
+    def create_tabs(self):
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(expand=True, fill='both')
+
+        # Create tabs for initiating test, viewing history, and displaying dashboard.
+        self.create_test_tab()
+        self.create_history_tab()
+        self.create_dashboard_tab()
+
+    # Method to create the 'Initiate Test' tab.
+    def create_test_tab(self):
+        test_tab = ttk.Frame(self.notebook)
+        self.notebook.add(test_tab, text='Initiate Test')
+
+        # Add button to initiate speed test.
+        initiate_test_button = ttk.Button(test_tab, text='Initiate Test', command=self.initiate_test)
+        initiate_test_button.pack(pady=20)
+
+    # Method to create the 'User Test History' tab.
+    def create_history_tab(self):
+        history_tab = ttk.Frame(self.notebook)
+        self.notebook.add(history_tab, text='User Test History')
+
+        # Add text box to display test history.
+        self.history_text = tk.Text(history_tab, wrap=tk.WORD, width=40, height=10)
+        self.history_text.pack(padx=10, pady=10)
+
+        # Add buttons for importing dataset and analyzing history.
+        import_button = ttk.Button(history_tab, text='Import Dataset', command=self.import_dataset)
+        import_button.pack(pady=10)
+
+        analyze_button = ttk.Button(history_tab, text='Analyze History', command=self.analyze_test_history)
+        analyze_button.pack(pady=10)
+
+    # Method to create the 'Dashboard' tab.
+    def create_dashboard_tab(self):
+        dashboard_tab = ttk.Frame(self.notebook)
+        self.notebook.add(dashboard_tab, text='Dashboard')
+
+        # Add components to display real-time graphs.
+        self.fig = Figure(figsize=(6, 10), dpi=100)
+        self.ax1 = self.fig.add_subplot(211)
+        self.ax1.set_xlabel('Time')
+        self.ax1.set_ylabel('Download Speed (Mbps)')
+        self.ax2 = self.fig.add_subplot(212)
+        self.ax2.set_xlabel('Time')
+        self.ax2.set_ylabel('Upload Speed (Mbps)')
+        self.graph = FigureCanvasTkAgg(self.fig, master=dashboard_tab)
+        self.graph.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+    # Method to initiate a speed test.
+    def initiate_test(self):
+        test_thread = threading.Thread(target=self.run_speed_test)
+        test_thread.start()
+
+    # Method to run the speed test.
+    def run_speed_test(self):
+        try:
+            st = speedtest.Speedtest()
+            st.get_best_server()
+
+            download_speed = st.download() / 1_000_000
+            upload_speed = st.upload() / 1_000_000
+            ping = st.results.ping
+            jitter = self.calculate_jitter([ping])
+            packet_loss = None
+
+            messagebox.showinfo("Test Results", f"Download Speed: {download_speed:.2f} Mbps\n"
+                                                f"Upload Speed: {upload_speed:.2f} Mbps\n"
+                                                f"Ping: {ping} ms\n"
+                                                f"Jitter: {jitter} ms\n"
+                                                f"Packet Loss: N/A")
+
+            test_result = {"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                           "download_speed": download_speed,
+                           "upload_speed": upload_speed,
+                           "ping": ping,
+                           "jitter": jitter,
+                           "packet_loss": packet_loss}
+            self.test_history.append(test_result)
+
+            self.update_history_tab()
+            self.update_graph()
+        except Exception as e:
+            messagebox.showerror("Test Error", f"Failed to run speed test: {str(e)}")
+
+    # Method to import a dataset.
+    def import_dataset(self):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        if file_path:
+            try:
+                self.imported_dataset = pd.read_csv(file_path)
+                messagebox.showinfo("Dataset Imported", "Dataset imported successfully.")
+            except Exception as e:
+                messagebox.showerror("Import Error", f"Failed to import dataset: {str(e)}")
+
+    # Method to analyze the test history.
+    def analyze_test_history(self):
+        if not self.imported_dataset.empty:
+            avg_download_dataset = self.imported_dataset['download_speed'].mean()
+
+            if self.test_history:
+                avg_download_user = sum(result['download_speed'] for result in self.test_history) / len(self.test_history)
+                comparison_result = "Comparison Result:\n"
+
+                if avg_download_user > avg_download_dataset:
+                    comparison_result += "Your average download speed is above the dataset's average.\n"
+                elif avg_download_user < avg_download_dataset:
+                    comparison_result += "Your average download speed is below the dataset's average.\n"
+                else:
+                    comparison_result += "Your average download speed matches the dataset's average.\n"
+
+                messagebox.showinfo("History Analysis", comparison_result)
+            else:
+                messagebox.showwarning("No Test History", "There is no test history available to analyze.")
+        else:
+            messagebox.showerror("Dataset Error", "The imported dataset is empty.")
+
+    # Method to update the test history tab.
+    def update_history_tab(self):
+        self.history_text.delete(1.0, tk.END)
+        for result in self.test_history:
+            self.history_text.insert(tk.END, f"Timestamp: {result['timestamp']}\n")
+            self.history_text.insert(tk.END, f"Download Speed: {result['download_speed']:.2f} Mbps\n")
+            self.history_text.insert(tk.END, f"Upload Speed: {result['upload_speed']:.2f} Mbps\n")
+            self.history_text.insert(tk.END, f"Ping: {result['ping']} ms\n")
+            self.history_text.insert(tk.END, f"Jitter: {result['jitter']} ms\n")
+            self.history_text.insert(tk.END, f"Packet Loss: {result['packet_loss']}%\n\n")
+
+    # Method to calculate jitter.
+    def calculate_jitter(self, ping_values):
+        mean_ping = sum(ping_values) / len(ping_values)
+        deviation_sum = sum((ping - mean_ping) ** 2 for ping in ping_values)
+        jitter = (deviation_sum / len(ping_values)) ** 0.5
+        return jitter
+
+    # Method to update the real-time graph.
+    def update_graph(self):
+        if self.test_history:
+            download_speeds = [result['download_speed'] for result in self.test_history]
+            upload_speeds = [result['upload_speed'] for result in self.test_history]
+
+            self.ax1.clear()
+            self.ax1.plot(range(len(download_speeds)), download_speeds, label='Download Speed')
+            self.ax1.legend()
+            
+            self.ax2.clear()
+            self.ax2.plot(range(len(upload_speeds)), upload_speeds, label='Upload Speed')
+            self.ax2.legend()
+
+            self.graph.draw()
+
+    # Method to start the thread for real-time graph updates.
+    def start_plot_thread(self):
+        self.plot_thread = threading.Thread(target=self.update_graph)
+        self.plot_thread.daemon = True
+        self.plot_thread.start()
+
+# Main method to execute the program.
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = InternetSpeedTool(root)
+    root.geometry("800x600")
+    app.start_plot_thread()
+    root.mainloop()
